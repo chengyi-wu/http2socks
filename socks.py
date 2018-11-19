@@ -13,19 +13,19 @@ class socksocket(socket.socket):
     def connect(self, address):
         super(socksocket, self).connect(('127.0.0.1', 1080))
         # self.setblocking()
-        print("connect::", address)
+        # print("connect::", address)
         self.__negotiatesocks5(address)
 
     def __negotiatesocks5(self, address):
         host, port = address
-        self.sendall(b'\x05\x02\x00\x02')
+        self.send(b'\x05\x02\x00\x02')
         chosenauth = self.recv(2)
         # print(chosenauth)
         req = b"\x05\x01\x00"
         req += b"\x03" + bytes(chr(len(host)) + host, 'utf-8')
         req += struct.pack(">H",port)
         # print(req)
-        self.sendall(req)
+        self.send(req)
         resp = self.recv(4)
         # print(resp)
         if resp[3] == 1:
