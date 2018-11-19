@@ -2,6 +2,7 @@ import socket
 import socketserver
 import select
 import logging
+import socks
 
 class SocksRequestHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server):
@@ -10,8 +11,6 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
-        self.request
-
         data = self._recvall()
         if len(data) == 0: return
         self.requestline = data.split(b'\r\n')[0].decode('ascii')
@@ -19,7 +18,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
 
         host, port = self._get_hostport(self.requestline)
 
-        self.shadowsocks = socket.socket()
+        self.shadowsocks = socks.socksocket()
         try:
             self._connect(host, port)
         except Exception as e:
