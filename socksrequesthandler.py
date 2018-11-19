@@ -69,7 +69,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             self.request.send(b'\r\n')
             data = response.read()
             response.close()
-            if 'Content-Encoding' in response.headers:
+            if response.headers and 'Content-Encoding' in response.headers:
                 if response.headers['Content-Encoding'] == 'gzip':
                     data = zlib.decompress(data, 16+zlib.MAX_WBITS)
                 else: # handle other CEs
