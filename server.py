@@ -5,7 +5,7 @@ import logging
 
 def main(level=logging.INFO):
     logging.basicConfig(level=level)
-    host = '127.0.0.1'
+    host = '0.0.0.0'
     port = 2080
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
     svr = socketserver.ThreadingTCPServer((host, port), socksrequesthandler.SocksRequestHandler)
