@@ -3,10 +3,8 @@ import socketserver
 import socksrequesthandler
 import logging
 
-def main(level=logging.INFO):
+def main(host='0.0.0.0', port=8080, level=logging.INFO):
     logging.basicConfig(level=level)
-    host = '0.0.0.0'
-    port = 2080
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
     svr = socketserver.ThreadingTCPServer((host, port), socksrequesthandler.SocksRequestHandler)
     svr.request_queue_size = 128
@@ -22,5 +20,5 @@ def main(level=logging.INFO):
     svr.server_close()
 
 if __name__ == '__main__':
-    main(logging.DEBUG)
+    main(level=logging.DEBUG)
     
