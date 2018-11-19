@@ -83,7 +83,6 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.shadowsocks.connect((host, port))
 
     def _socket_forward(self):
-        # print("enter _socket_forward")
         buffersize = self.blocksize
         rlist = [self.request, self.shadowsocks]
         while rlist:
