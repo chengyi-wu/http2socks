@@ -22,5 +22,5 @@ def main(level=logging.INFO):
     svr.server_close()
 
 if __name__ == '__main__':
-    main(logging.INFO)
+    main(logging.DEBUG)
     

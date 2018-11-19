@@ -37,7 +37,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             self.request.send(data)
         else:
             # if http, then send the data from client to destination
-            self.shadowsocks.sendall(data)
+            self.shadowsocks.send(data)
         
         self._socket_forward()
     
@@ -50,7 +50,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
     def _fail(self, err=''):
         data = 'HTTP/2.0 502 Bad Gateway\r\n\r\n' + err
         data = bytes(data, 'utf-8')
-        self.request.sendall(data)
+        self.request.send(data)
         
     def _recvall(self):
         data = b''

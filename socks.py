@@ -18,7 +18,7 @@ class socksocket(socket.socket):
 
     def __negotiatesocks5(self, address):
         host, port = address
-        self.sendall(b'5202')
+        self.sendall(b'\x05\x02\x00\x02')
         chosenauth = self.recv(2)
         # print(chosenauth)
         req = b"\x05\x01\x00"
