@@ -4,30 +4,36 @@ import select
 import logging
 import socks
 import http.client
-import zlib
 
 HTTP_VER = 'HTTP/1.1'
-FORWARDED_BY = b'Forwarded-By:PySocks Agent\r\n'
+FORWARDED_BY = b'Z-Forwarded-By:PySocks Agent\r\n'
+
+logger = logging.getLogger('SocksRequestHandler')
 
 class SocksRequestHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server):
         self.shadowsocks = None
         self.blocksize = 4096
+        self.connection_timeout = 30
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
         data = self._recvall(self.request)
         if len(data) == 0: return
         self.requestline = data.split(b'\r\n')[0].decode('ascii')
-        logging.debug(self.requestline)
+        logger.debug("handle [%s]" % self.requestline)
 
         host, port = self._get_hostport(self.requestline)
 
+        proxyhost, porxyport = self.server.socksproxy
         self.shadowsocks = socks.socksocket()
+        if proxyhost and porxyport:
+            self.shadowsocks.setproxy(proxyhost, porxyport)
+        
         try:
             self._connect(host, port)
         except Exception as e:
-            logging.warning("Failed to tunnel to %s:%d : %s" % (host, port, str(e)))
+            logger.warning("Failed to tunnel to %s:%d : %s" % (host, port, str(e)))
             self.shadowsocks.close()
             self._fail(str(e))
             return
@@ -52,35 +58,48 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             try:
                 response.begin()  
             except Exception as err:
-                logging.error(str(err))
+                logger.error('Unable to read response for %s : %s' % (self.requestline, str(err)))
                 response.close()
+                return
             status_line = "%s %s %s\r\n" % (HTTP_VER, response.status, response.reason)
-            logging.debug(status_line)
-            self.request.send(bytes(status_line, 'utf-8'))
+            # logger.debug(status_line)
+            try:
+                self.request.send(bytes(status_line, 'utf-8'))
 
-            if response.headers:
-                for k, v in response.headers.items():
-                    # remove TE and CE because I read the body from socket using HTTPResponse
-                    if 'Transfer-Encoding' == k or 'Content-Encoding' == k:
-                        continue
-                    data = bytes(k + ':' + v + '\r\n', 'utf-8')
+                if response.headers:
+                    for k, v in response.headers.items():
+                        data = '%s:%s\r\n' % (k, v)
+                        data = bytes(data, 'utf-8')
+                        self.request.send(data)
+                self.request.send(FORWARDED_BY)
+                self.request.send(b'\r\n')
+                data = response.read()
+                response.close()
+                # Transfer-Encoding
+                # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding
+                # chunked
+                # Data is sent in a series of chunks. The Content-Length header is omitted in this case and at the 
+                # beginning of each chunk you need to add the length of the current chunk in hexadecimal format, 
+                # followed by '\r\n' and then the chunk itself, followed by another '\r\n'. 
+                # The terminating chunk is a regular chunk, with the exception that its length is zero. 
+                # It is followed by the trailer, which consists of a (possibly empty) sequence of entity header fields.
+                if response.headers and response.headers.get('Transfer-Encoding') == 'chunked':
+                    self.request.send(b"%x\r\n" % len(data))
+                    self.request.send(data + b'\r\n')
+                    self.request.send(b'0\r\n')
+                else:
                     self.request.send(data)
-            self.request.send(FORWARDED_BY)
-            self.request.send(b'\r\n')
-            data = response.read()
-            response.close()
-            if response.headers and 'Content-Encoding' in response.headers:
-                if response.headers['Content-Encoding'] == 'gzip':
-                    data = zlib.decompress(data, 16+zlib.MAX_WBITS)
-                else: # handle other CEs
-                    pass
-            # logging.debug(data)
-            self.request.send(data)
+                self.request.send(b'\r\n')
+            except Exception as err:
+                logger.error("Unable to send response for %s : %s" % (self.requestline, str(err)))
+                response.close()
 
     def finish(self):
         if self.shadowsocks and self.shadowsocks.fileno() != -1:
-            logging.debug("close %d" % self.shadowsocks.fileno())
+            # logger.debug("close %d" % self.shadowsocks.fileno())
             self.shadowsocks.close()
+        if hasattr(self, 'requestline'):
+            logger.debug("finish [%s]" % self.requestline)
         super(SocksRequestHandler, self).finish()
 
     def _fail(self, err=''):
@@ -114,13 +133,15 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         return requestline.split()[0]
 
     def _connect(self, host, port):
-        logging.info("connecting %s:%d from %s:%d" % (host, port, self.client_address[0], self.client_address[1]))
+        logger.info("connecting %s:%d from %s:%d" % (host, port, self.client_address[0], self.client_address[1]))
         self.shadowsocks.connect((host, port))
 
     def _socket_forward(self):
         buffersize = self.blocksize
         rlist = [self.request, self.shadowsocks]
-        while rlist:
+        count = 0
+        while count < self.connection_timeout:
+            count += 1
             rfd, _, xfd = select.select(rlist, [], rlist, 1.0)
             for fd in xfd:
                 if fd in rlist:
@@ -136,6 +157,5 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     if fd is self.shadowsocks:
                         out = self.request
                     out.send(data)
-                    logging.debug("_socket_forward %d=>%d : %s" % (fd.fileno(), out.fileno(), len(data)))
-                else:
-                    rlist = None
+                    # logger.debug("_socket_forward %d=>%d : %s" % (fd.fileno(), out.fileno(), len(data)))
+                    count = 0

@@ -2,13 +2,20 @@
 
 A TCP socket server runs locally and forward the requests through socksV5 proxy.
 
+```
+>>> python server.py
+    running @ 127.0.0.1:8080
+
+-h <host:port> for hosting tcp server
+-p <host:port> for socks 5 proxy
+```
+
 ### Details
-- default port is 2080
+- default port is 8080
 - ThreadingTCPServer
 - request_queue_size = 128
 - socket bytes forwarding for https
-- removing 'Content-Encoding' and 'Transfer-Encoding' in http headers (ONLY for http requests)
-- added 'Forwarded-By' http header (ONLY for http requests)
+- added 'Z-Forwarded-By' http header (**ONLY** for http requests)
 
 #### Requirements
 - Python 3
