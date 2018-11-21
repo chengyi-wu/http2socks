@@ -59,7 +59,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             try:
                 response.begin()  
             except Exception as err:
-                logger.exception(err, self.requestline)
+                logger.exception("%s : %s" % (self.requestline, str(err)))
                 response.close()
                 return
             status_line = "%s %s %s\r\n" % (HTTP_VER, response.status, response.reason)
@@ -93,7 +93,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     self.request.send(data)
                 self.request.send(b'\r\n')
             except Exception as err:
-                logger.exception(err, self.requestline)
+                logger.exception("%s : %s" % (self.requestline, str(err)))
                 response.close()
 
     def finish(self):
@@ -162,7 +162,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 try:
                     data = fd.recv(self.blocksize)
                 except Exception as err:
-                    logger.error(err)
+                    logger.error("%s" % str(err))
                 else:
                     logger.debug('RECV from %d : %d' % (fd.fileno(), len(data)))
                 if data:
@@ -185,7 +185,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     try:
                         fd.send(data)
                     except Exception as err:
-                        logger.error(err)
+                        logger.error("%s" % str(err))
                         pass
                     else:
                         logger.debug('SEND from %d : %d' % (fd.fileno(), len(data)))
