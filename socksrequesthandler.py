@@ -4,6 +4,8 @@ import select
 import logging
 import socks
 import http.client
+import queue
+import traceback
 
 HTTP_VER = 'HTTP/1.1'
 FORWARDED_BY = b'Z-Forwarded-By:PySocks Agent\r\n'
@@ -14,14 +16,13 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server):
         self.shadowsocks = None
         self.blocksize = 4096
-        self.connection_timeout = 30
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
         data = self._recvall(self.request)
         if len(data) == 0: return
         self.requestline = data.split(b'\r\n')[0].decode('ascii')
-        logger.debug("handle [%s]" % self.requestline)
+        logger.debug("entering [%s]" % self.requestline)
 
         host, port = self._get_hostport(self.requestline)
 
@@ -41,8 +42,6 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         method = self._get_method(self.requestline)
         
         if method == 'CONNECT':
-            self.request.setblocking(0)
-            self.shadowsocks.setblocking(0)
             # if https, send response code 200 to client
             data = HTTP_VER + ' 200 Connection established\r\n\r\n'
             data = bytes(data, 'utf-8')
@@ -54,11 +53,13 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             self.shadowsocks.send(data)
 
             # forward synchronously
+            # have to deal with the response, http request can be redirected to different hosts
+            # need to let redirects to finish
             response = http.client.HTTPResponse(self.shadowsocks, method=method)
             try:
                 response.begin()  
             except Exception as err:
-                logger.error('Unable to read response for %s : %s' % (self.requestline, str(err)))
+                logger.error(str(err), self.requestline)
                 response.close()
                 return
             status_line = "%s %s %s\r\n" % (HTTP_VER, response.status, response.reason)
@@ -84,14 +85,15 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 # The terminating chunk is a regular chunk, with the exception that its length is zero. 
                 # It is followed by the trailer, which consists of a (possibly empty) sequence of entity header fields.
                 if response.headers and response.headers.get('Transfer-Encoding') == 'chunked':
-                    self.request.send(b"%x\r\n" % len(data))
+                    size = format("x", len(data))
+                    self.request.send(b"%x\r\n" % size)
                     self.request.send(data + b'\r\n')
                     self.request.send(b'0\r\n')
                 else:
                     self.request.send(data)
                 self.request.send(b'\r\n')
             except Exception as err:
-                logger.error("Unable to send response for %s : %s" % (self.requestline, str(err)))
+                logger.error(str(err), self.requestline)
                 response.close()
 
     def finish(self):
@@ -99,7 +101,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             # logger.debug("close %d" % self.shadowsocks.fileno())
             self.shadowsocks.close()
         if hasattr(self, 'requestline'):
-            logger.debug("finish [%s]" % self.requestline)
+            logger.debug("leaving [%s]" % self.requestline)
         super(SocksRequestHandler, self).finish()
 
     def _fail(self, err=''):
@@ -137,25 +139,79 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.shadowsocks.connect((host, port))
 
     def _socket_forward(self):
-        buffersize = self.blocksize
-        rlist = [self.request, self.shadowsocks]
-        count = 0
-        while count < self.connection_timeout:
-            count += 1
-            rfd, _, xfd = select.select(rlist, [], rlist, 1.0)
+        """ flow
+        1. receive data from local socket, put data on local queue
+        2. get data from local queue, write it to the remote socket
+        3. receive data from remote socket, put data on remote queue
+        4. get data from remote queue, write it to the local socket
+        """
+        self.shadowsocks.setblocking(0)
+
+        req_q = queue.Queue()
+        sdw_q = queue.Queue()
+
+        rlist = xlist = [self.request, self.shadowsocks]
+        wlist = []
+        while len(rlist) > 1: # self.request is always open
+            rfd, wfd, xfd = select.select(rlist, wlist, xlist)
             for fd in xfd:
-                if fd in rlist:
-                    rlist.remove(fd)
+                rlist.remove(fd)
+                fd.close()
             for fd in rfd:
                 data = b''
                 try:
-                    data = fd.recv(buffersize)
-                except:
-                    pass
+                    data = fd.recv(self.blocksize)
+                except Exception as err:
+                    logger.error(str(err))
+                else:
+                    logger.debug('RECV from %d : %d' % (fd.fileno(), len(data)))
                 if data:
-                    out = self.shadowsocks
-                    if fd is self.shadowsocks:
-                        out = self.request
-                    out.send(data)
-                    # logger.debug("_socket_forward %d=>%d : %s" % (fd.fileno(), out.fileno(), len(data)))
-                    count = 0
+                    if fd is self.request:
+                        req_q.put(data)
+                        wlist.append(self.shadowsocks)
+                    else:
+                        sdw_q.put(data)
+                        wlist.append(self.request)
+                else:
+                    rlist.remove(fd)
+            for fd in wfd:
+                wlist.remove(fd)
+                if fd is self.request:
+                    q = sdw_q
+                else:
+                    q = req_q
+                while not q.empty():
+                    data = q.get()
+                    try:
+                        fd.send(data)
+                    except Exception as err:
+                        logger.error(str(err))
+                        pass
+                    else:
+                        logger.debug('SEND from %d : %d' % (fd.fileno(), len(data)))
+
+    # def _socket_forward(self):
+    #     self.request.setblocking(0)
+    #     self.shadowsocks.setblocking(0)
+    #     buffersize = self.blocksize
+    #     rlist = [self.request, self.shadowsocks]
+    #     count = 0
+    #     while count < self.connection_timeout:
+    #         count += 1
+    #         rfd, _, xfd = select.select(rlist, [], rlist, 1.0)
+    #         for fd in xfd:
+    #             if fd in rlist:
+    #                 rlist.remove(fd)
+    #         for fd in rfd:
+    #             data = b''
+    #             try:
+    #                 data = fd.recv(buffersize)
+    #             except:
+    #                 pass
+    #             if data:
+    #                 out = self.shadowsocks
+    #                 if fd is self.shadowsocks:
+    #                     out = self.request
+    #                 out.send(data)
+    #                 logger.debug("_socket_forward %s=>%s : %s" % (fd, out, data))
+    #                 count = 0
