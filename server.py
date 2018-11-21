@@ -12,7 +12,7 @@ def main(host:str, port:int, proxyhost=None, proxyport=None, level=logging.INFO)
     svr = socketserver.ThreadingTCPServer((host, port), socksrequesthandler.SocksRequestHandler)
     svr.request_queue_size = 128
     svr.socksproxy = (proxyhost, proxyport)
-    print("running @ %s:%d" %(host, port))
+    logger.info("running @ %s:%d" %(host, port))
     try:
         svr.serve_forever()
     except KeyboardInterrupt:
@@ -42,5 +42,5 @@ if __name__ == '__main__':
     if proxy and ':' in proxy:
         proxyport = int(proxy[proxy.index(':') + 1:])
         proxyhost = proxy[:proxy.index(':')]
-    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.WARN)
+    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.INFO)
     
