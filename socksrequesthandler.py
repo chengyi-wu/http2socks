@@ -84,7 +84,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 # followed by '\r\n' and then the chunk itself, followed by another '\r\n'. 
                 # The terminating chunk is a regular chunk, with the exception that its length is zero. 
                 # It is followed by the trailer, which consists of a (possibly empty) sequence of entity header fields.
-                if response.headers and response.headers.get('Transfer-Encoding') == 'chunked':
+                if response.chunked:
                     size = "{:x}\r\n".format(len(data))
                     self.request.send(bytes(size, 'utf-8'))
                     self.request.send(data + b'\r\n')
@@ -168,10 +168,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 if data:
                     if fd is self.request:
                         req_q.put(data)
-                        wlist.append(self.shadowsocks)
                     else:
                         sdw_q.put(data)
-                        wlist.append(self.request)
                 else:
                     rlist.remove(fd)
             for fd in wfd:
