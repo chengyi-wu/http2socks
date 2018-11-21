@@ -59,7 +59,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             try:
                 response.begin()  
             except Exception as err:
-                logger.error(str(err), self.requestline)
+                logger.exception(err, self.requestline)
                 response.close()
                 return
             status_line = "%s %s %s\r\n" % (HTTP_VER, response.status, response.reason)
@@ -93,7 +93,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     self.request.send(data)
                 self.request.send(b'\r\n')
             except Exception as err:
-                logger.error(str(err), self.requestline)
+                logger.exception(err, self.requestline)
                 response.close()
 
     def finish(self):
@@ -151,7 +151,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         sdw_q = queue.Queue()
 
         rlist = xlist = [self.request, self.shadowsocks]
-        wlist = []
+        wlist = [self.request, self.shadowsocks]
         while len(rlist) > 1: # self.request is always open
             rfd, wfd, xfd = select.select(rlist, wlist, xlist)
             for fd in xfd:
@@ -162,7 +162,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 try:
                     data = fd.recv(self.blocksize)
                 except Exception as err:
-                    logger.error(str(err))
+                    logger.error(err)
                 else:
                     logger.debug('RECV from %d : %d' % (fd.fileno(), len(data)))
                 if data:
@@ -175,7 +175,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 else:
                     rlist.remove(fd)
             for fd in wfd:
-                wlist.remove(fd)
+                # wlist.remove(fd)
                 if fd is self.request:
                     q = sdw_q
                 else:
@@ -185,7 +185,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     try:
                         fd.send(data)
                     except Exception as err:
-                        logger.error(str(err))
+                        logger.error(err)
                         pass
                     else:
                         logger.debug('SEND from %d : %d' % (fd.fileno(), len(data)))
