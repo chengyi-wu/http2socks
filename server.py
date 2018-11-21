@@ -42,5 +42,5 @@ if __name__ == '__main__':
     if proxy and ':' in proxy:
         proxyport = int(proxy[proxy.index(':') + 1:])
         proxyhost = proxy[:proxy.index(':')]
-    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.INFO)
+    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.DEBUG)
     

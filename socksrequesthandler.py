@@ -151,7 +151,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         sdw_q = queue.Queue()
 
         rlist = xlist = [self.request, self.shadowsocks]
-        wlist = [self.request, self.shadowsocks]
+        wlist = []
         while len(rlist) > 1: # self.request is always open
             rfd, wfd, xfd = select.select(rlist, wlist, xlist)
             for fd in xfd:
@@ -168,12 +168,14 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 if data:
                     if fd is self.request:
                         req_q.put(data)
+                        wlist += [self.shadowsocks]
                     else:
                         sdw_q.put(data)
+                        wlist += [self.request]
                 else:
                     rlist.remove(fd)
             for fd in wfd:
-                # wlist.remove(fd)
+                wlist.remove(fd)
                 if fd is self.request:
                     q = sdw_q
                 else:
