@@ -85,8 +85,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 # The terminating chunk is a regular chunk, with the exception that its length is zero. 
                 # It is followed by the trailer, which consists of a (possibly empty) sequence of entity header fields.
                 if response.headers and response.headers.get('Transfer-Encoding') == 'chunked':
-                    size = format("x", len(data))
-                    self.request.send(b"%x\r\n" % size)
+                    size = "%x\r\n".format(len(data))
+                    self.request.send(bytes(size, 'utf-8'))
                     self.request.send(data + b'\r\n')
                     self.request.send(b'0\r\n')
                 else:
