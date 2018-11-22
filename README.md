@@ -1,6 +1,6 @@
 # http-to-socks
 
-A TCP socket server runs locally and forward the requests through socksV5 proxy.
+A TCP socket server runs locally and forward the requests through socks 5 proxy.
 
 ```
 >>> python server.py
