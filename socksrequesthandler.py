@@ -5,7 +5,7 @@ import logging
 import socks
 import http.client
 import queue
-import traceback
+import email.parser
 
 HTTP_VER = 'HTTP/1.1'
 FORWARDED_BY = b'Z-Forwarded-By:PySocks Agent\r\n'
@@ -44,60 +44,21 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         if method == 'CONNECT':
             # if https, send response code 200 to client
             data = HTTP_VER + ' 200 Connection established\r\n\r\n'
-            data = bytes(data, 'utf-8')
+            data = data.encode('utf-8')
             self.request.send(data)
 
-            self._socket_forward()
+            self._secure_socket_forward()
         else:
             # if http, send the data from client to destination
             self.shadowsocks.send(data)
-
-            # forward synchronously
-            # have to deal with the response, http request can be redirected to different hosts
-            # need to let redirects to finish
-            response = http.client.HTTPResponse(self.shadowsocks, method=method)
+            fp = self.shadowsocks.makefile('rb')
             try:
-                response.begin()  
-            except Exception as err:
-                logger.exception("%s : %s" % (self.requestline, str(err)))
-                response.close()
-                self.shadowsocks.close()
-                self._fail(str(err))
-                return
-                
-            status_line = "%s %s %s\r\n" % (HTTP_VER, response.status, response.reason)
-            # logger.debug(status_line)
-            try:
-                self.request.send(bytes(status_line, 'utf-8'))
-
-                if response.headers:
-                    for k, v in response.headers.items():
-                        data = '%s:%s\r\n' % (k, v)
-                        data = bytes(data, 'utf-8')
-                        self.request.send(data)
-                self.request.send(FORWARDED_BY)
-                self.request.send(b'\r\n')
-                data = response.read()
-                response.close()
-                # Transfer-Encoding
-                # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding
-                # chunked
-                # Data is sent in a series of chunks. The Content-Length header is omitted in this case and at the 
-                # beginning of each chunk you need to add the length of the current chunk in hexadecimal format, 
-                # followed by '\r\n' and then the chunk itself, followed by another '\r\n'. 
-                # The terminating chunk is a regular chunk, with the exception that its length is zero. 
-                # It is followed by the trailer, which consists of a (possibly empty) sequence of entity header fields.
-                if response.chunked:
-                    size = "{:x}\r\n".format(len(data))
-                    self.request.send(bytes(size, 'utf-8'))
-                    self.request.send(data + b'\r\n')
-                    self.request.send(b'0\r\n')
-                else:
-                    self.request.send(data)
+                self._socket_forward(fp, debuglevel=0, _method=method)
                 self.request.send(b'\r\n')
             except Exception as err:
-                logger.exception("%s : %s" % (self.requestline, str(err)))
-                response.close()
+                logger.exception("Unable to foward [%s] : %s" % (self.requestline, str(err)))
+
+            fp.close()
 
     def finish(self):
         if self.shadowsocks and self.shadowsocks.fileno() != -1:
@@ -109,7 +70,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
 
     def _fail(self, err=''):
         data = HTTP_VER + ' 502 Bad Gateway\r\n\r\n' + err
-        data = bytes(data, 'utf-8')
+        data = data.encode('utf-8')
         self.request.send(data)
         
     def _recvall(self, sock):
@@ -141,7 +102,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         logger.info("connecting %s:%d from %s:%d" % (host, port, self.client_address[0], self.client_address[1]))
         self.shadowsocks.connect((host, port))
 
-    def _socket_forward(self):
+    def _secure_socket_forward(self):
         """ flow
         1. receive data from local socket, put data on local queue
         2. get data from local queue, write it to the remote socket
@@ -218,3 +179,209 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
     #                 out.send(data)
     #                 logger.debug("_socket_forward %s=>%s : %s" % (fd, out, data))
     #                 count = 0
+
+    def _socket_forward(self, fp, debuglevel=0, _method=None):
+        """Similar to http.client.HTTPResponse.
+        Parse the http header, chunked or content-length to determine how many 
+        bytes to send / recevie.
+
+        This is synchronize.
+        """
+        _UNKNOWN = 'UNKNOWN'
+
+        MAXAMOUNT = 1048576
+        _MAXLINE = 65536
+        _MAXHEADERS = 100
+
+        CONTINUE = 100
+        NO_CONTENT = 204
+        NOT_MODIFIED = 304
+
+        chunked = _UNKNOWN
+        global chunk_left
+        chunk_left = _UNKNOWN
+        length = _UNKNOWN
+
+        sock = self.request
+
+        def _read_status(fp):
+            line = str(fp.readline(_MAXLINE + 1), "iso-8859-1")
+            if debuglevel > 0:
+                print("reply:", repr(line))
+            if not line:
+                raise Exception("Remote end closed connection without response")
+            
+            return line
+        
+        def _parse_status(line):
+            try:
+                version, status, reason = line.split(None, 2)
+            except ValueError:
+                try:
+                    version, status = line.split(None, 1)
+                    reason = ""
+                except ValueError:
+                    version = ""
+            
+            try:
+                status = int(status)
+            except ValueError:
+                status = -1
+            
+            return version, status, reason
+
+        def parse_headers(fp, _class=http.client.HTTPMessage):
+            """Parses only RFC2822 headers from a file pointer.
+
+            email Parser wants to see strings rather than bytes.
+            But a TextIOWrapper around self.rfile would buffer too many bytes
+            from the stream, bytes which we later need to read as bytes.
+            So we read the correct bytes here, as bytes, for email Parser
+            to parse.
+
+            """
+            headers = []
+            while True:
+                line = fp.readline(_MAXLINE + 1)
+                if len(line) > _MAXLINE:
+                    raise LineTooLong("header line")
+                headers.append(line)
+                if len(headers) > _MAXHEADERS:
+                    raise HTTPException("got more than %d headers" % _MAXHEADERS)
+                if line in (b'\r\n', b'\n', b''):
+                    break
+            hstring = b''.join(headers).decode('iso-8859-1')
+            return email.parser.Parser(_class=_class).parsestr(hstring)
+
+        def _read_next_chunk_size():
+            line = fp.readline(_MAXLINE + 1)
+            i = line.find(b";")
+            if i > 0:
+                line = line[:i]
+            try:
+                return int(line, 16)
+            except ValueError:
+                raise
+
+        def _read_and_discard_trailer():
+            while True:
+                line = fp.readline(_MAXLINE + 1)
+                if not line: break
+                if line in (b'\r\n', b'\n', b''):
+                    break
+
+        def _safe_read(amt):
+            s = []
+            while amt > 0:
+                chunk = fp.read(min(amt, MAXAMOUNT))
+                if not chunk:
+                    raise Exception("IncompleteRead")
+                s.append(chunk)
+                amt -= len(chunk)
+            return b"".join(s)
+
+        def _get_chunk_left():
+            global chunk_left
+            if not chunk_left: # Can be 0 or None
+                if chunk_left is not None:
+                    # We are at the end of the chunk. dirchard chunk end
+                    _safe_read(2) # toss the CRLF at the end of the chunk
+                try:
+                    chunk_left = _read_next_chunk_size()
+                except ValueError:
+                    raise Exception("IncompleteRead")
+                if chunk_left == 0:
+                    # last chunk: 1*("0") [ chunk-extention ] CRLF
+                    _read_and_discard_trailer()
+                    # we read everything; close the "file"
+                    chunk_left = None
+            return chunk_left
+
+        status_line = ""
+        while True:
+            status_line = _read_status(fp)
+            version, status, reason = _parse_status(status_line)
+            if status != CONTINUE: break
+            
+            # skip the head from the 100 response
+            while True:
+                skip = fp.readline(_MAXLINE + 1)
+                skip = skip.strip()
+                if not skip: break
+                if debuglevel > 0:
+                    print("header:", skip)
+        
+        # forward status line
+        sock.send(status_line.encode('iso-8859-1'))
+
+        headers = parse_headers(fp)
+        
+        # forward the headers
+        for hdr in headers:
+            val = headers.get(hdr)
+            data = "%s: %s\r\n" % (hdr, val)
+            data = data.encode('utf-8')
+            sock.send(data)
+            if debuglevel > 0: print(data)
+        
+        sock.send(FORWARDED_BY)
+        # header done
+        sock.send(b"\r\n")
+        
+        tr_enc = headers.get("transfer-encoding")
+        if tr_enc and tr_enc.lower() == "chunked":
+            chunked = True
+            chunk_left = None
+        else:
+            chunked = False
+
+        # do we have a Conent-Length?
+        length = headers.get("content-length")
+
+        # are we using the chunked-sytle of transfer encoding?
+        tr_enc = headers.get("transfer-encoding")
+
+        if length and not chunked:
+            try:
+                length = int(length)
+            except ValueError:
+                length = None
+            else:
+                if length < 0: length = None
+        else:
+            length = None
+        
+        if (status == NO_CONTENT or status == NOT_MODIFIED or 
+            100 <= status < 200 or _method == "HEAD"):
+            length = 0
+
+        if debuglevel > 0:
+            print("chunked =", chunked)
+            print("content-length =", length)
+
+        # read()
+        if _method == "HEAD":
+            return
+
+        if chunked:
+            while True:
+                chunk_left = _get_chunk_left()
+                if debuglevel > 0:
+                    print("chunk_left =", chunk_left)
+                if chunk_left is None: break
+                data = "%x\r\n" % chunk_left
+                data = data.encode("utf-8")
+                if debuglevel > 0:
+                    print("chunk_left =", chunk_left)
+                sock.send(data)
+                data = _safe_read(chunk_left)
+                sock.send(data + b'\r\n')
+                chunk_left = 0
+            # last chunk: 1*("0") [ chunk-extention ] CRLF
+            sock.send(b'0\r\n')
+        else:       
+            if length is None:
+                s = fp.read()
+            else:
+                s = _safe_read(length)
+            sock.send(s)
