@@ -33,10 +33,10 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         
         try:
             self._connect(host, port)
-        except Exception as e:
-            logger.warning("Failed to tunnel to %s:%d : %s" % (host, port, str(e)))
+        except Exception as err:
+            logger.warning("Failed to tunnel to %s:%d : %s" % (host, port, str(err)))
             self.shadowsocks.close()
-            self._fail(str(e))
+            self._fail(str(err))
             return
         
         method = self._get_method(self.requestline)
@@ -61,7 +61,10 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             except Exception as err:
                 logger.exception("%s : %s" % (self.requestline, str(err)))
                 response.close()
+                self.shadowsocks.close()
+                self._fail(str(err))
                 return
+                
             status_line = "%s %s %s\r\n" % (HTTP_VER, response.status, response.reason)
             # logger.debug(status_line)
             try:
