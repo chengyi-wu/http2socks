@@ -8,7 +8,7 @@ import queue
 import email.parser
 
 HTTP_VER = 'HTTP/1.1'
-FORWARDED_BY = b'Z-Forwarded-By:PySocks Agent\r\n'
+FORWARDED_BY = b'Z-Forwarded-By:Socks Proxy Server v0.1\r\n'
 
 logger = logging.getLogger('SocksRequestHandler')
 
@@ -30,7 +30,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.shadowsocks = socks.socksocket()
         if proxyhost and porxyport:
             self.shadowsocks.setproxy(proxyhost, porxyport)
-        self.shadowsocks.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # self.shadowsocks.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
         try:
             self._connect(host, port)
@@ -54,12 +54,11 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             self.shadowsocks.send(data)
             fp = self.shadowsocks.makefile('rb')
             try:
-                self._socket_forward(fp, debuglevel=0, _method=method)
+                self._socket_forward(fp, debuglevel=1, _method=method)
                 self.request.send(b'\r\n')
             except Exception as err:
-                logger.exception("Unable to foward [%s] : %s" % (self.requestline, str(err)))
-
-            fp.close()
+                logger.exception("Unable to forward [%s] : %s" % (self.requestline, str(err)))
+            fp.close()  
 
     def finish(self):
         if self.shadowsocks and self.shadowsocks.fileno() != -1:
@@ -155,38 +154,9 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     else:
                         logger.debug('SEND from %d : %d' % (fd.fileno(), len(data)))
 
-    # def _socket_forward(self):
-    #     self.request.setblocking(0)
-    #     self.shadowsocks.setblocking(0)
-    #     buffersize = self.blocksize
-    #     rlist = [self.request, self.shadowsocks]
-    #     count = 0
-    #     while count < self.connection_timeout:
-    #         count += 1
-    #         rfd, _, xfd = select.select(rlist, [], rlist, 1.0)
-    #         for fd in xfd:
-    #             if fd in rlist:
-    #                 rlist.remove(fd)
-    #         for fd in rfd:
-    #             data = b''
-    #             try:
-    #                 data = fd.recv(buffersize)
-    #             except:
-    #                 pass
-    #             if data:
-    #                 out = self.shadowsocks
-    #                 if fd is self.shadowsocks:
-    #                     out = self.request
-    #                 out.send(data)
-    #                 logger.debug("_socket_forward %s=>%s : %s" % (fd, out, data))
-    #                 count = 0
-
     def _socket_forward(self, fp, debuglevel=0, _method=None):
-        """Similar to http.client.HTTPResponse.
-        Parse the http header, chunked or content-length to determine how many 
-        bytes to send / recevie.
-
-        This is synchronize.
+        """Copy from http.client.HTTPResponse()
+        parse the http heads to determine the bytes to read, this is blocking read
         """
         _UNKNOWN = 'UNKNOWN'
 
@@ -199,8 +169,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         NOT_MODIFIED = 304
 
         chunked = _UNKNOWN
-        global chunk_left
-        chunk_left = _UNKNOWN
+        self.chunk_left = _UNKNOWN
         length = _UNKNOWN
 
         sock = self.request
@@ -245,10 +214,10 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             while True:
                 line = fp.readline(_MAXLINE + 1)
                 if len(line) > _MAXLINE:
-                    raise LineTooLong("header line")
+                    raise Exception("header line")
                 headers.append(line)
                 if len(headers) > _MAXHEADERS:
-                    raise HTTPException("got more than %d headers" % _MAXHEADERS)
+                    raise Exception("got more than %d headers" % _MAXHEADERS)
                 if line in (b'\r\n', b'\n', b''):
                     break
             hstring = b''.join(headers).decode("iso-8859-1")
@@ -282,8 +251,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             return b"".join(s)
 
         def _get_chunk_left():
-            global chunk_left
-            if not chunk_left: # Can be 0 or None
+            chunk_left = self.chunk_left
+            if not self.chunk_left: # Can be 0 or None
                 if chunk_left is not None:
                     # We are at the end of the chunk. dirchard chunk end
                     _safe_read(2) # toss the CRLF at the end of the chunk
@@ -296,12 +265,13 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     _read_and_discard_trailer()
                     # we read everything; close the "file"
                     chunk_left = None
+                self.chunk_left = chunk_left
             return chunk_left
 
         status_line = ""
         while True:
             status_line = _read_status(fp)
-            version, status, reason = _parse_status(status_line)
+            _, status, _ = _parse_status(status_line)
             if status != CONTINUE: break
             
             # skip the head from the 100 response
@@ -332,7 +302,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         tr_enc = headers.get("transfer-encoding")
         if tr_enc and tr_enc.lower() == "chunked":
             chunked = True
-            chunk_left = None
+            self.chunk_left = None
         else:
             chunked = False
 
@@ -357,13 +327,13 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             length = 0
 
         if debuglevel > 0:
-            print("chunked =", chunked)
-            print("content-length =", length)
+            print("chunked:", chunked)
+            print("Content-Length:", length)
 
         # read()
         if _method == "HEAD":
             return
-
+        # _readall_chunked()
         if chunked:
             while True:
                 chunk_left = _get_chunk_left()
@@ -377,7 +347,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 sock.send(data)
                 data = _safe_read(chunk_left)
                 sock.send(data + b'\r\n')
-                chunk_left = 0
+                self.chunk_left = 0
             # last chunk: 1*("0") [ chunk-extention ] CRLF
             sock.send(b'0\r\n')
         else:       
@@ -385,4 +355,5 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 s = fp.read()
             else:
                 s = _safe_read(length)
+            if debuglevel > 0: print(len(s))
             sock.send(s)
