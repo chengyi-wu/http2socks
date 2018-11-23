@@ -16,12 +16,12 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server):
         self.shadowsocks = None
         self.blocksize = 4096
+        self.debuglevel = 0
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
-        UNAUTHORIZED = 401
-
         data = self._recvall(self.request)
+        if self.debuglevel > 0: print("send:", data)
         if len(data) == 0: return
         self.requestline = data.split(b'\r\n')[0].decode("iso-8859-1")
         logger.info("entering [%d][%s]" % (self.request.fileno(), self.requestline))
@@ -54,18 +54,13 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         else:
             # if http, send the data from client to destination
             self.shadowsocks.send(data)
-            will_close = True
-            status = None
             fp = self.shadowsocks.makefile('rb')
             try:
-                will_close, status = self._socket_forward(fp, debuglevel=0, _method=method)
+                self._socket_forward(fp, debuglevel=self.debuglevel, _method=method)
                 self.request.send(b'\r\n')
             except Exception as err:
                 logger.exception("Unable to forward [%s] : %s" % (self.requestline, str(err)))
             
-            if (not will_close or # persistent
-                status == UNAUTHORIZED ): # authentication
-                self._secure_socket_forward()
             fp.close()
 
     def finish(self):
@@ -136,7 +131,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 except Exception as err:
                     logger.error("%s" % str(err))
                 else:
-                    logger.debug('RECV from [%d] : %d' % (fd.fileno(), len(data)))
+                    logger.debug('RECV from [%d] : %s' % (fd.fileno(), len(data)))
                 if data:
                     if fd is self.request:
                         req_q.put(data)
@@ -335,6 +330,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             sock.send(data)
             if debuglevel > 0: print(data)
         
+        print(self.requestline)
         sock.send(FORWARDED_BY)
         # header done
         sock.send(b"\r\n")
