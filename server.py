@@ -4,26 +4,27 @@ import socksrequesthandler
 import logging
 import sys
 import time, threading
+import collections
 
 logger = logging.getLogger('SocksProxyServer')
 
 class SocksProxyServer(socketserver.ThreadingTCPServer):
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
-        self.requests = 0
+        self.requests = set()
         super(SocksProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
 
     def process_request(self, request, client_address):
         """Overridden
         same as ThreadingTCPServer.process_request
         """
-        self.requests += 1
+        self.requests.add(request.fileno())
         super(SocksProxyServer, self).process_request(request, client_address)
 
     def close_request(self, request):
         """Overridden
         same as ThreadingTCPServer.close_request
         """
-        self.requests -= 1
+        self.requests.remove(request.fileno())
         super(SocksProxyServer, self).close_request(request)
 
     def server_activate(self):
@@ -37,13 +38,14 @@ class SocksProxyServer(socketserver.ThreadingTCPServer):
 
         super(SocksProxyServer, self).server_activate()
 
-    def _timerEvent(self):
+    def _timer_event(self):
         """timer
         wakes up every second and print the stauts of the server
         """
         while True:
             time.sleep(self.timer_timeout)
-            print("[SocksProxyServer] [%s] requests = %d, threads = %d" % (time.strftime("%H:%M:%S"), self.requests, threading.activeCount()))
+            logger.info("[SocksProxyServer] [%s] requests = %d, threads = %d" % (time.strftime("%H:%M:%S"), len(self.requests), threading.activeCount()))
+            print(self.requests)
 
 def main(host:str, port:int, proxyhost=None, proxyport=None, level=logging.INFO):
     logging.basicConfig(level=level)

@@ -8,7 +8,7 @@ import queue
 import email.parser
 
 HTTP_VER = 'HTTP/1.1'
-FORWARDED_BY = b'Z-Forwarded-By:Socks Proxy Server v0.1\r\n'
+FORWARDED_BY = b'Z-Forwarded-By:Socks Proxy Server 0.1\r\n'
 
 logger = logging.getLogger('SocksRequestHandler')
 
@@ -24,7 +24,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         data = self._recvall(self.request)
         if len(data) == 0: return
         self.requestline = data.split(b'\r\n')[0].decode("iso-8859-1")
-        logger.info("entering [%s]" % self.requestline)
+        logger.info("entering [%d][%s]" % (self.request.fileno(), self.requestline))
 
         host, port = self._get_hostport(self.requestline)
 
@@ -73,7 +73,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             # logger.debug("close %d" % self.shadowsocks.fileno())
             self.shadowsocks.close()
         if hasattr(self, 'requestline'):
-            logger.info("leaving [%s]" % self.requestline)
+            logger.info("leaving [%d][%s]" % (self.request.fileno(), self.requestline))
         super(SocksRequestHandler, self).finish()
 
     def _fail(self, err=''):
