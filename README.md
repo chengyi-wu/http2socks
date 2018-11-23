@@ -17,8 +17,5 @@ A TCP socket server runs locally and forward the requests through socks 5 proxy.
 - socket bytes forwarding for https
 - added 'Z-Forwarded-By' http header (**ONLY** for http requests)
 
-### Limits
-- no persistent http connection
-
 #### Requirements
 - Python 3

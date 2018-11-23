@@ -61,8 +61,10 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 self.request.send(b'\r\n')
             except Exception as err:
                 logger.exception("Unable to forward [%s] : %s" % (self.requestline, str(err)))
-            if status == 401:
+
+            if status == 401 or not will_close: # make it persistent
                 self._secure_socket_forward()
+
             fp.close()
 
     def finish(self):
