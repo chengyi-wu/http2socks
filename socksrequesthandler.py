@@ -19,6 +19,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
+        UNAUTHORIZED = 401
+
         data = self._recvall(self.request)
         if len(data) == 0: return
         self.requestline = data.split(b'\r\n')[0].decode("iso-8859-1")
@@ -52,13 +54,19 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         else:
             # if http, send the data from client to destination
             self.shadowsocks.send(data)
+            will_close = True
+            status = None
             fp = self.shadowsocks.makefile('rb')
             try:
-                self._socket_forward(fp, debuglevel=1, _method=method)
+                will_close, status = self._socket_forward(fp, debuglevel=0, _method=method)
                 self.request.send(b'\r\n')
             except Exception as err:
                 logger.exception("Unable to forward [%s] : %s" % (self.requestline, str(err)))
-            fp.close()  
+            
+            if (not will_close or # persistent
+                status == UNAUTHORIZED ): # authentication
+                self._secure_socket_forward()
+            fp.close()
 
     def finish(self):
         if self.shadowsocks and self.shadowsocks.fileno() != -1:
@@ -172,6 +180,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.chunk_left = _UNKNOWN
         length = _UNKNOWN
 
+        will_close = _UNKNOWN 
+
         sock = self.request
 
         def _read_status(fp):
@@ -223,6 +233,36 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             hstring = b''.join(headers).decode("iso-8859-1")
             return email.parser.Parser(_class=_class).parsestr(hstring)
 
+        def _check_close(version):
+            conn = headers.get("connection")
+            if version == 11:
+                # An HTTP/1.1 proxy is assumed to stay open unless
+                # explicitly closed.
+                conn = headers.get("connection")
+                if conn and "close" in conn.lower():
+                    return True
+                return False
+
+            # Some HTTP/1.0 implementations have support for persistent
+            # connections, using rules different than HTTP/1.1.
+
+            # For older HTTP, Keep-Alive indicates persistent connection.
+            if headers.get("keep-alive"):
+                return False
+
+            # At least Akamai returns a "Connection: Keep-Alive" header,
+            # which was supposed to be sent by the client.
+            if conn and "keep-alive" in conn.lower():
+                return False
+
+            # Proxy-Connection is a netscape hack.
+            pconn = headers.get("proxy-connection")
+            if pconn and "keep-alive" in pconn.lower():
+                return False
+
+            # otherwise, assume it will close
+            return True
+
         def _read_next_chunk_size():
             line = fp.readline(_MAXLINE + 1)
             i = line.find(b";")
@@ -271,7 +311,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         status_line = ""
         while True:
             status_line = _read_status(fp)
-            _, status, _ = _parse_status(status_line)
+            version, status, _ = _parse_status(status_line)
             if status != CONTINUE: break
             
             # skip the head from the 100 response
@@ -306,6 +346,9 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         else:
             chunked = False
 
+        # will the connection close at the end of the response?
+        will_close = _check_close(version)
+
         # do we have a Conent-Length?
         length = headers.get("content-length")
 
@@ -326,9 +369,15 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             100 <= status < 200 or _method == "HEAD"):
             length = 0
 
+        if (not will_close and
+            not chunked and
+            length is None):
+            will_close = True
+
         if debuglevel > 0:
             print("chunked:", chunked)
             print("Content-Length:", length)
+            print("will_close:", will_close)
 
         # read()
         if _method == "HEAD":
@@ -357,3 +406,5 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 s = _safe_read(length)
             if debuglevel > 0: print(len(s))
             sock.send(s)
+
+        return will_close, status
