@@ -136,7 +136,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 except Exception as err:
                     logger.error("%s" % str(err))
                 else:
-                    logger.debug('RECV from %d : %d' % (fd.fileno(), len(data)))
+                    logger.debug('RECV from [%d] : %d' % (fd.fileno(), len(data)))
                 if data:
                     if fd is self.request:
                         req_q.put(data)
@@ -160,7 +160,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                         logger.error("%s" % str(err))
                         pass
                     else:
-                        logger.debug('SEND from %d : %d' % (fd.fileno(), len(data)))
+                        logger.debug('SEND from [%d] : %d' % (fd.fileno(), len(data)))
 
     def _socket_forward(self, fp, debuglevel=0, _method=None):
         """Copy from http.client.HTTPResponse()
@@ -383,6 +383,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         if _method == "HEAD":
             return
         # _readall_chunked()
+        size = 0
         if chunked:
             while True:
                 chunk_left = _get_chunk_left()
@@ -396,6 +397,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 sock.send(data)
                 data = _safe_read(chunk_left)
                 sock.send(data + b'\r\n')
+                size += chunk_left
                 self.chunk_left = 0
             # last chunk: 1*("0") [ chunk-extention ] CRLF
             sock.send(b'0\r\n')
@@ -405,6 +407,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             else:
                 s = _safe_read(length)
             if debuglevel > 0: print(len(s))
+            size += len(s)
             sock.send(s)
+        logger.debug("TRAN [%d] => [%d] : %d" % (fp.fileno(), self.request.fileno(), size))
 
         return will_close, status
