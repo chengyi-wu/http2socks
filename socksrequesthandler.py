@@ -6,6 +6,7 @@ import socks
 import http.client
 import queue
 import email.parser
+from urllib.parse import urlparse
 
 HTTP_VER = 'HTTP/1.1'
 FORWARDED_BY = b'Z-Forwarded-By:Socks Proxy Server 0.1\r\n'
@@ -17,6 +18,9 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.shadowsocks = None
         self.blocksize = 4096
         self.debuglevel = 0
+
+        # persistent connection timeout
+        self.connection_timeout = 5
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
@@ -26,8 +30,40 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.requestline = data.split(b'\r\n')[0].decode("iso-8859-1")
         logger.info("entering [%d][%s]" % (self.request.fileno(), self.requestline))
 
-        host, port = self._get_hostport(self.requestline)
+        method, full_url, version = self.requestline.split()
 
+        result = urlparse(full_url)
+
+        path = result.path
+        netloc = result.netloc
+        scheme = result.scheme
+
+        if not netloc:
+            netloc = path
+            path = ''
+        
+        host, port = self._get_hostport(netloc)
+
+        # rebuild the request data to avoid redirect loop
+        # reason see http.client
+        if method != 'CONNECT':
+            # this header is issued *only* for HTTP/1.1
+            # connections. more specifically, this means it is
+            # only issued when the client uses the new
+            # HTTPConnection() class. backwards-compat clients
+            # will be using HTTP/1.0 and those clients may be
+            # issuing this header themselves. we should NOT issue
+            # it twice; some web servers (such as Apache) barf
+            # when they see two Host: headers
+
+            # If we need a non-standard port,include it in the
+            # header.  If the request is going through a proxy,
+            # but the host of the actual URL, not the host of the
+            # proxy.
+            if not path:
+                path = '/'
+            data = ("%s %s %s" % (method, path, version)).encode("iso-8859-1") + data[data.index(b'\r\n'):]
+        
         proxyhost, porxyport = self.server.socksproxy
         self.shadowsocks = socks.socksocket()
         if proxyhost and porxyport:
@@ -38,13 +74,10 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             self._connect(host, port)
         except Exception as err:
             logger.warning("Failed to tunnel to %s:%d : %s" % (host, port, str(err)))
-            self.shadowsocks.close()
             self._fail(str(err))
             return
         
-        method = self._get_method(self.requestline)
-        
-        if method == 'CONNECT':
+        if scheme == 'https' or port == 443:
             # if https, send response code 200 to client
             data = HTTP_VER + ' 200 Connection established\r\n\r\n'
             data = data.encode("utf-8")
@@ -88,15 +121,9 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             if len(data) < self.blocksize : break
         return data
 
-    def _get_hostport(self, requestline):
-        requestline = requestline.split()
-        netloc = requestline[1]
+    def _get_hostport(self, netloc):
         host = netloc
         port = 80 # default port
-        if '://' in netloc:
-            host = netloc[netloc.index('://') + 3 : ]
-        if '/' in host:
-            host = host[ : host.index('/')]
         if ':' in host:
             port = int(host[host.index(':') + 1 : ])
             host = host[ : host.index(':')]
@@ -123,8 +150,10 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
 
         rlist = xlist = [self.request, self.shadowsocks]
         wlist = []
+        count = 0
         while len(rlist) > 1: # self.request is always open
-            rfd, wfd, xfd = select.select(rlist, wlist, xlist)
+            count += 1
+            rfd, wfd, xfd = select.select(rlist, wlist, xlist, 1)
             for fd in xfd:
                 rlist.remove(fd)
                 fd.close()
@@ -137,6 +166,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 else:
                     logger.debug('RECV from [%d] : %s' % (fd.fileno(), len(data)))
                 if data:
+                    count = 0 # reset timer
                     if fd is self.request:
                         req_q.put(data)
                         wlist += [self.shadowsocks]
@@ -160,6 +190,11 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                         pass
                     else:
                         logger.debug('SEND from [%d] : %d' % (fd.fileno(), len(data)))
+            if count == self.connection_timeout:
+                # keep-alive timeout
+                logger.info('keep-alive timeout for [%s]' % self.requestline)
+                rlist = None
+                break
 
     def _socket_forward(self, fp, debuglevel=0, _method=None):
         """Copy from http.client.HTTPResponse()

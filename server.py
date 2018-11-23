@@ -33,7 +33,7 @@ class SocksProxyServer(socketserver.ThreadingTCPServer):
         """
         self.timer = threading.Thread(target=self._timer_event)
         self.timer.daemon = True
-        self.timer_timeout = 1
+        self.timer_timeout = 10
         self.timer.start()
 
         super(SocksProxyServer, self).server_activate()
