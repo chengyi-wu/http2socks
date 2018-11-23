@@ -54,13 +54,15 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         else:
             # if http, send the data from client to destination
             self.shadowsocks.send(data)
+            will_close, status = True, None
             fp = self.shadowsocks.makefile('rb')
             try:
-                self._socket_forward(fp, debuglevel=self.debuglevel, _method=method)
+                will_close, status = self._socket_forward(fp, debuglevel=self.debuglevel, _method=method)
                 self.request.send(b'\r\n')
             except Exception as err:
                 logger.exception("Unable to forward [%s] : %s" % (self.requestline, str(err)))
-            
+            if status == 401:
+                self._secure_socket_forward()
             fp.close()
 
     def finish(self):
@@ -330,7 +332,6 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             sock.send(data)
             if debuglevel > 0: print(data)
         
-        print(self.requestline)
         sock.send(FORWARDED_BY)
         # header done
         sock.send(b"\r\n")
