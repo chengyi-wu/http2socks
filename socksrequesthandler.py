@@ -20,7 +20,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.debuglevel = 0
 
         # persistent connection timeout
-        self.connection_timeout = 5
+        self.connection_timeout = 15
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
@@ -77,12 +77,12 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             self._fail(str(err))
             return
         
-        if scheme == 'https' or port == 443:
-            # if https, send response code 200 to client
+        if method == 'CONNECT':
             data = HTTP_VER + ' 200 Connection established\r\n\r\n'
             data = data.encode("utf-8")
             self.request.send(data)
-
+        
+        if scheme == 'https' or port == 443:
             self._secure_socket_forward()
         else:
             # if http, send the data from client to destination
@@ -228,6 +228,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             return line
         
         def _parse_status(line):
+            version = reason = ""
+            status = -1
             try:
                 version, status, reason = line.split(None, 2)
             except ValueError:
