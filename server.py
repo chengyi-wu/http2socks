@@ -3,16 +3,57 @@ import socketserver
 import socksrequesthandler
 import logging
 import sys
+import time, threading
 
-logger = logging.getLogger('server')
+logger = logging.getLogger('SocksProxyServer')
+
+class SocksProxyServer(socketserver.ThreadingTCPServer):
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+        self.requests = 0
+        super(SocksProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
+
+    def process_request(self, request, client_address):
+        """Overridden
+        same as ThreadingTCPServer.process_request
+        """
+        self.requests += 1
+        super(SocksProxyServer, self).process_request(request, client_address)
+
+    def close_request(self, request):
+        """Overridden
+        same as ThreadingTCPServer.close_request
+        """
+        self.requests -= 1
+        super(SocksProxyServer, self).close_request(request)
+
+    def server_activate(self):
+        """Overridden
+        adding a timer thread wakes up every one second and print status
+        """
+        self.timer = threading.Thread(target=self._timerEvent)
+        self.timer.daemon = True
+        self.timer_timeout = 1
+        self.timer.start()
+
+        super(SocksProxyServer, self).server_activate()
+
+    def _timerEvent(self):
+        """timer
+        wakes up every second and print the stauts of the server
+        """
+        while True:
+            time.sleep(self.timer_timeout)
+            print("[SocksProxyServer] [%s] requests = %d, threads = %d" % (time.strftime("%H:%M:%S"), self.requests, threading.activeCount()))
 
 def main(host:str, port:int, proxyhost=None, proxyport=None, level=logging.INFO):
     logging.basicConfig(level=level)
+    svr_class = SocksProxyServer
+    svr_class.allow_reuse_address = True
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
-    svr = socketserver.ThreadingTCPServer((host, port), socksrequesthandler.SocksRequestHandler)
+    svr = svr_class((host, port), socksrequesthandler.SocksRequestHandler)
     svr.request_queue_size = 128
     svr.socksproxy = (proxyhost, proxyport)
-    print("running @ %s:%d" %(host, port))
+    logger.info("running @ %s:%d" %(host, port))
     try:
         svr.serve_forever()
     except KeyboardInterrupt:
@@ -42,5 +83,5 @@ if __name__ == '__main__':
     if proxy and ':' in proxy:
         proxyport = int(proxy[proxy.index(':') + 1:])
         proxyhost = proxy[:proxy.index(':')]
-    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.WARN)
+    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.INFO)
     

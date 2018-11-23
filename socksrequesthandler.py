@@ -21,8 +21,8 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
         data = self._recvall(self.request)
         if len(data) == 0: return
-        self.requestline = data.split(b'\r\n')[0].decode('ascii')
-        logger.debug("entering [%s]" % self.requestline)
+        self.requestline = data.split(b'\r\n')[0].decode("iso-8859-1")
+        logger.info("entering [%s]" % self.requestline)
 
         host, port = self._get_hostport(self.requestline)
 
@@ -30,6 +30,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.shadowsocks = socks.socksocket()
         if proxyhost and porxyport:
             self.shadowsocks.setproxy(proxyhost, porxyport)
+        self.shadowsocks.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
         try:
             self._connect(host, port)
@@ -44,7 +45,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         if method == 'CONNECT':
             # if https, send response code 200 to client
             data = HTTP_VER + ' 200 Connection established\r\n\r\n'
-            data = data.encode('utf-8')
+            data = data.encode("utf-8")
             self.request.send(data)
 
             self._secure_socket_forward()
@@ -65,12 +66,12 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             # logger.debug("close %d" % self.shadowsocks.fileno())
             self.shadowsocks.close()
         if hasattr(self, 'requestline'):
-            logger.debug("leaving [%s]" % self.requestline)
+            logger.info("leaving [%s]" % self.requestline)
         super(SocksRequestHandler, self).finish()
 
     def _fail(self, err=''):
         data = HTTP_VER + ' 502 Bad Gateway\r\n\r\n' + err
-        data = data.encode('utf-8')
+        data = data.encode("utf-8")
         self.request.send(data)
         
     def _recvall(self, sock):
@@ -99,7 +100,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         return requestline.split()[0]
 
     def _connect(self, host, port):
-        logger.info("connecting %s:%d from %s:%d" % (host, port, self.client_address[0], self.client_address[1]))
+        logger.debug("connecting %s:%d from %s:%d" % (host, port, self.client_address[0], self.client_address[1]))
         self.shadowsocks.connect((host, port))
 
     def _secure_socket_forward(self):
@@ -250,7 +251,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     raise HTTPException("got more than %d headers" % _MAXHEADERS)
                 if line in (b'\r\n', b'\n', b''):
                     break
-            hstring = b''.join(headers).decode('iso-8859-1')
+            hstring = b''.join(headers).decode("iso-8859-1")
             return email.parser.Parser(_class=_class).parsestr(hstring)
 
         def _read_next_chunk_size():
@@ -312,7 +313,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                     print("header:", skip)
         
         # forward status line
-        sock.send(status_line.encode('iso-8859-1'))
+        sock.send(status_line.encode("iso-8859-1"))
 
         headers = parse_headers(fp)
         
@@ -320,7 +321,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         for hdr in headers:
             val = headers.get(hdr)
             data = "%s: %s\r\n" % (hdr, val)
-            data = data.encode('utf-8')
+            data = data.encode("utf-8")
             sock.send(data)
             if debuglevel > 0: print(data)
         
