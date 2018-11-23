@@ -31,7 +31,7 @@ class SocksProxyServer(socketserver.ThreadingTCPServer):
         """Overridden
         adding a timer thread wakes up every one second and print status
         """
-        self.timer = threading.Thread(target=self._timerEvent)
+        self.timer = threading.Thread(target=self._timer_event)
         self.timer.daemon = True
         self.timer_timeout = 1
         self.timer.start()
