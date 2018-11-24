@@ -20,7 +20,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
         self.debuglevel = 0
 
         # persistent connection timeout
-        self.connection_timeout = 15
+        self.connection_timeout = 30
         super(SocksRequestHandler, self).__init__(request, client_address, server)
 
     def handle(self):
@@ -150,10 +150,12 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
 
         rlist = xlist = [self.request, self.shadowsocks]
         wlist = []
+
         count = 0
-        while len(rlist) > 1: # self.request is always open
+        timeout = 3
+        while True: # self.request is always open
             count += 1
-            rfd, wfd, xfd = select.select(rlist, wlist, xlist, 1)
+            rfd, wfd, xfd = select.select(rlist, wlist, xlist, timeout)
             for fd in xfd:
                 rlist.remove(fd)
                 fd.close()
@@ -166,16 +168,14 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                 else:
                     logger.debug('RECV from [%d] : %s' % (fd.fileno(), len(data)))
                 if data:
-                    count = 0 # reset timer
                     if fd is self.request:
                         req_q.put(data)
                         wlist += [self.shadowsocks]
                     else:
                         sdw_q.put(data)
                         wlist += [self.request]
-                else:
-                    rlist.remove(fd)
             for fd in wfd:
+                count = 0 # reset timer
                 wlist.remove(fd)
                 if fd is self.request:
                     q = sdw_q
@@ -190,7 +190,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
                         pass
                     else:
                         logger.debug('SEND from [%d] : %d' % (fd.fileno(), len(data)))
-            if count == self.connection_timeout:
+            if count == (self.connection_timeout // timeout):
                 # keep-alive timeout
                 logger.info('keep-alive timeout for [%s]' % self.requestline)
                 rlist = None
