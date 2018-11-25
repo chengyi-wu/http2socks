@@ -1,14 +1,14 @@
 import socket
-import socketserver
-import socksrequesthandler
+from socketserver import ThreadingMixIn
+from handler import SocksRequestHandler
 import logging
 import sys
 import time, threading
-import collections
+from http.server import HTTPServer
 
 logger = logging.getLogger('SocksProxyServer')
 
-class SocksProxyServer(socketserver.ThreadingTCPServer):
+class SocksProxyServer(ThreadingMixIn, HTTPServer):
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
         self.requests = set()
         super(SocksProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
@@ -51,8 +51,8 @@ def main(host:str, port:int, proxyhost=None, proxyport=None, level=logging.INFO)
     svr_class = SocksProxyServer
     svr_class.allow_reuse_address = True
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
-    svr = svr_class((host, port), socksrequesthandler.SocksRequestHandler)
-    svr.request_queue_size = 128
+    svr = svr_class((host, port), SocksRequestHandler)
+    # svr.request_queue_size = 128
     svr.socksproxy = (proxyhost, proxyport)
     logger.info("running @ %s:%d" %(host, port))
     try:
