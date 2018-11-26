@@ -23,6 +23,14 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         self.proxy = server.proxy
         super(SocksRequestHandler, self).__init__(request, classmethod, server)
 
+    def handle_one_request(self):
+        '''Override to handle [Errno 54] Connection reset by peer.
+        '''
+        try:
+            super(SocksRequestHandler, self).handle_one_request()
+        except socket.error as e:
+            if self.debuglevel > 0: print("[SocksRequestHandler]", str(e))
+
     def _recvall(self, sock:socket.socket):
         data = b''
         while True:
@@ -172,6 +180,8 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         if (self.command == 'HEAD' or 
             resp.code < 200 or 
             resp.code in (HTTPStatus.NO_CONTENT, HTTPStatus.RESET_CONTENT, HTTPStatus.NOT_MODIFIED)):
+            if resp.will_close:
+                resp.close()
             return
         
         resp_body = resp.read()
@@ -191,6 +201,9 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
 
         if self.debuglevel > 0:
             print("[_forward_response]", resp.code, resp.reason, self.requestline)
+
+        if resp.will_close:
+            resp.close()
 
         if resp.code == HTTPStatus.UNAUTHORIZED:
             self._blind_forward()
