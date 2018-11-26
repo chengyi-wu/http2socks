@@ -19,6 +19,7 @@ class socksocket(socket.socket):
     def __init__(self, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None):
         self.socksproxy = None
         self.proxycred = None
+        self.addr = None
         super(socksocket, self).__init__(
             family=family,
             type=type,
@@ -26,7 +27,7 @@ class socksocket(socket.socket):
             fileno=fileno
         )
 
-    def setproxy(self, host, port, username = None, password = None):
+    def set_proxy(self, host, port, username = None, password = None):
         if host:
             if not port:
                 port = 1080
@@ -35,6 +36,7 @@ class socksocket(socket.socket):
             self.proxycred = (username, password)
     
     def connect(self, address):
+        self.addr = address
         if self.socksproxy:
             super(socksocket, self).connect(self.socksproxy)
             self.__negotiatesocks5(address)

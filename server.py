@@ -3,29 +3,37 @@ from socketserver import ThreadingMixIn
 from handler import SocksRequestHandler
 import logging
 import sys
-import time, threading
+import time
+import threading
 from http.server import HTTPServer
 
-logger = logging.getLogger('SocksProxyServer')
+logger = logging.getLogger('PyProxyServer')
 
-class SocksProxyServer(ThreadingMixIn, HTTPServer):
+# class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+#     daemon_threads = True
+class PyProxyServer(ThreadingMixIn, HTTPServer):
+    '''Copy of Python 3.7 ThreadingHTTPServer
+    '''
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
-        self.requests = set()
-        super(SocksProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
+        daemon_threads = True
+        self.openrequests = []
+        self.debuglevel = 0
+        self.proxy = None
+        super(PyProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
 
     def process_request(self, request, client_address):
         """Overridden
         same as ThreadingTCPServer.process_request
         """
-        self.requests.add(request.fileno())
-        super(SocksProxyServer, self).process_request(request, client_address)
+        self.openrequests.append(request.fileno())
+        super(PyProxyServer, self).process_request(request, client_address)
 
     def close_request(self, request):
         """Overridden
         same as ThreadingTCPServer.close_request
         """
-        self.requests.remove(request.fileno())
-        super(SocksProxyServer, self).close_request(request)
+        self.openrequests.remove(request.fileno())
+        super(PyProxyServer, self).close_request(request)
 
     def server_activate(self):
         """Overridden
@@ -36,7 +44,7 @@ class SocksProxyServer(ThreadingMixIn, HTTPServer):
         self.timer_timeout = 10
         self.timer.start()
 
-        super(SocksProxyServer, self).server_activate()
+        super(PyProxyServer, self).server_activate()
 
     def _timer_event(self):
         """timer
@@ -44,18 +52,18 @@ class SocksProxyServer(ThreadingMixIn, HTTPServer):
         """
         while True:
             time.sleep(self.timer_timeout)
-            if len(self.requests) > 0:
-                print("[SocksProxyServer] [%s] requests = %d, threads = %d, %s" % (time.strftime("%H:%M:%S"), len(self.requests), threading.activeCount(), repr(self.requests)))
+            print("[PyProxyServer] [%s] Open Requests = %d %s" % (time.strftime("%H:%M:%S"), len(self.openrequests), repr(self.openrequests)))
 
-def main(host:str, port:int, proxyhost=None, proxyport=None, level=logging.INFO):
+def main(host:str, port:int, proxy = None, level=logging.INFO):
     logging.basicConfig(level=level)
-    svr_class = SocksProxyServer
+    svr_class = PyProxyServer
     svr_class.allow_reuse_address = True
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
     svr = svr_class((host, port), SocksRequestHandler)
-    # svr.request_queue_size = 128
-    svr.socksproxy = (proxyhost, proxyport)
-    logger.info("running @ %s:%d" %(host, port))
+    
+    svr.debuglevel = 0
+    svr.proxy = proxy
+    logger.info("Listening @ %s:%d" %(host, port))
     try:
         svr.serve_forever()
     except KeyboardInterrupt:
@@ -85,5 +93,5 @@ if __name__ == '__main__':
     if proxy and ':' in proxy:
         proxyport = int(proxy[proxy.index(':') + 1:])
         proxyhost = proxy[:proxy.index(':')]
-    main(host, port, proxyhost=proxyhost, proxyport=proxyport, level=logging.INFO)
+    main(host, port, proxy = (proxyhost, proxyport), level=logging.INFO)
     
