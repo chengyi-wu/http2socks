@@ -23,7 +23,7 @@ Non-caching HTTP proxy in python.
    - CONNECT
 - Support authentication forward
 - HTTPS
-   - Act as "tunnel", blindly exchange the bytes from client and server.
+   - Act as "tunnel", blindly exchange the bytes between client and server.
    - keep-alive: 30
 
 #### Requirements
