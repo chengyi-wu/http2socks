@@ -107,9 +107,15 @@ class BaseProxyRequestHandler(StreamRequestHandler):
         elif not words:
             return False
         else:
-            self.send_error(
-                HTTPStatus.BAD_REQUEST,
+            self.log_error("code %d, message %s", 
+                HTTPStatus.BAD_REQUEST, 
                 "Bad request syntax (%r)" % requestline)
+            self.send_response_only(HTTPStatus.BAD_REQUEST,
+                "Bad request syntax (%r)" % requestline)
+            self.end_headers()
+            # self.send_error(
+            #     HTTPStatus.BAD_REQUEST,
+            #     "Bad request syntax (%r)" % requestline)
             return False
         self.command, self.path, self.request_version = command, path, version
 
@@ -251,31 +257,28 @@ class BaseProxyRequestHandler(StreamRequestHandler):
         self.send_response(code, message)
         self.send_header('Connection', 'close')
 
-        try:
-            # Message body is omitted for cases described in:
-            #  - RFC7230: 3.3. 1xx, 204(No Content), 304(Not Modified)
-            #  - RFC7231: 6.3.6. 205(Reset Content)
-            body = None
-            if (code >= 200 and
-                code not in (HTTPStatus.NO_CONTENT,
-                            HTTPStatus.RESET_CONTENT,
-                            HTTPStatus.NOT_MODIFIED)):
-                # HTML encode to prevent Cross Site Scripting attacks
-                # (see bug #1100201)
-                content = (self.error_message_format % {
-                    'code': code,
-                    'message': html.escape(message, quote=False),
-                    'explain': html.escape(explain, quote=False)
-                })
-                body = content.encode('UTF-8', 'replace')
-                self.send_header("Content-Type", self.error_content_type)
-                self.send_header('Content-Length', int(len(body)))
-            self.end_headers()
+        # Message body is omitted for cases described in:
+        #  - RFC7230: 3.3. 1xx, 204(No Content), 304(Not Modified)
+        #  - RFC7231: 6.3.6. 205(Reset Content)
+        body = None
+        if (code >= 200 and
+            code not in (HTTPStatus.NO_CONTENT,
+                        HTTPStatus.RESET_CONTENT,
+                        HTTPStatus.NOT_MODIFIED)):
+            # HTML encode to prevent Cross Site Scripting attacks
+            # (see bug #1100201)
+            content = (self.error_message_format % {
+                'code': code,
+                'message': html.escape(message, quote=False),
+                'explain': html.escape(explain, quote=False)
+            })
+            body = content.encode('UTF-8', 'replace')
+            self.send_header("Content-Type", self.error_content_type)
+            self.send_header('Content-Length', int(len(body)))
+        self.end_headers()
 
-            if self.command != 'HEAD' and body:
-                self.wfile.write(body)
-        except BrokenPipeError:
-            pass
+        if self.command != 'HEAD' and body:
+            self.wfile.write(body)
 
     def send_response(self, code, message=None):
         """Add the response header to the headers buffer and log the
@@ -451,8 +454,9 @@ class SocksRequestHandler(BaseProxyRequestHandler):
         shadowsock.setproxy('raspberrypi', 1080)
         try:
             shadowsock.connect((host, port))
-        except:
+        except Exception as err:
             shadowsock.close()
+            if self.debuglevel > 0: print("_tunnel", str(err))
             return None
         
         return shadowsock
@@ -508,7 +512,8 @@ class SocksRequestHandler(BaseProxyRequestHandler):
             if count == self.idle_timeout:
                 # idle timeout
                 time_elapsed = time.time() - start_time
-                print('idle timeout for [%s] : %.4f' % (self.requestline, time_elapsed))
+                if self.debuglevel > 0:
+                    print('idle timeout for [%s] : %.4f' % (self.requestline, time_elapsed))
                 break
 
     def _forward_request(self, requestline, debuglevel=0):
@@ -589,7 +594,8 @@ class SocksRequestHandler(BaseProxyRequestHandler):
             self.shadowsocks = self._tunnel(host, port)
         
         if not self.shadowsocks:
-            self.send_error(HTTPStatus.BAD_GATEWAY)
+            self.send_response(HTTPStatus.BAD_GATEWAY)
+            self.end_headers()
             self.close_connection = True
             return    
 
@@ -599,7 +605,9 @@ class SocksRequestHandler(BaseProxyRequestHandler):
         except Exception as err:
             if self.debuglevel > 0: print(err)
             try:
-                self.send_error(HTTPStatus.BAD_GATEWAY, message=repr(err))
+                self.send_response(HTTPStatus.BAD_GATEWAY, message=str(err))
+                self.end_headers()
+                self.close_connection = True
             except:
                 pass
 
@@ -625,5 +633,8 @@ class SocksRequestHandler(BaseProxyRequestHandler):
 
         if self.shadowsocks:
             self._socket_forward()
+            self.shadowsocks.close()
         else:
-            self.send_error(HTTPStatus.BAD_GATEWAY)
+            self.send_response(HTTPStatus.BAD_GATEWAY)
+            self.end_headers()
+            self.close_connection = True

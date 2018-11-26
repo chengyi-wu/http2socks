@@ -95,7 +95,7 @@ class SocksRequestHandler(socketserver.BaseRequestHandler):
             except Exception as err:
                 logger.exception("Unable to forward [%s] : %s" % (self.requestline, str(err)))
 
-            if status == 401 or not will_close: # make it persistent
+            if status == 401: # make it persistent only for authentication, ignore will_close
                 self._secure_socket_forward()
 
             fp.close()

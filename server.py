@@ -44,7 +44,8 @@ class SocksProxyServer(ThreadingMixIn, HTTPServer):
         """
         while True:
             time.sleep(self.timer_timeout)
-            print("[SocksProxyServer] [%s] requests = %d, threads = %d, %s" % (time.strftime("%H:%M:%S"), len(self.requests), threading.activeCount(), repr(self.requests)))
+            if len(self.requests) > 0:
+                print("[SocksProxyServer] [%s] requests = %d, threads = %d, %s" % (time.strftime("%H:%M:%S"), len(self.requests), threading.activeCount(), repr(self.requests)))
 
 def main(host:str, port:int, proxyhost=None, proxyport=None, level=logging.INFO):
     logging.basicConfig(level=level)
