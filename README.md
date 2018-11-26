@@ -1,6 +1,6 @@
 # http-to-socks
 
-Non-cachding HTTP proxy in python.
+Non-caching HTTP proxy in python.
 
 ```
 >>> python server.py
