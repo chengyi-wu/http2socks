@@ -54,14 +54,14 @@ class PyProxyServer(ThreadingMixIn, HTTPServer):
             time.sleep(self.timer_timeout)
             print("[PyProxyServer] [%s] Open Requests = %d %s" % (time.strftime("%H:%M:%S"), len(self.openrequests), repr(self.openrequests)))
 
-def main(host:str, port:int, proxy = None, level=logging.INFO):
+def main(host:str, port:int, proxy = None, level=logging.INFO, debuglevel=0):
     logging.basicConfig(level=level)
     svr_class = PyProxyServer
     svr_class.allow_reuse_address = True
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
     svr = svr_class((host, port), SocksRequestHandler)
     
-    svr.debuglevel = 0
+    svr.debuglevel = debuglevel
     svr.proxy = proxy
     logger.info("Listening @ %s:%d" %(host, port))
     try:
@@ -79,6 +79,12 @@ if __name__ == '__main__':
     host = '127.0.0.1'
     port = 8080
     proxy = proxyhost = proxyport = None
+    debuglevel = 0
+    for arg in argv:
+        if arg.lower() == '-d':
+            argv.remove(arg)
+            debuglevel = 1
+            break
     if len(argv) % 2 != 0:
         print("Incorrect parameneters")
     for i in range(0, len(argv), 2):
@@ -93,5 +99,5 @@ if __name__ == '__main__':
     if proxy and ':' in proxy:
         proxyport = int(proxy[proxy.index(':') + 1:])
         proxyhost = proxy[:proxy.index(':')]
-    main(host, port, proxy = (proxyhost, proxyport), level=logging.INFO)
+    main(host, port, proxy = (proxyhost, proxyport), level=logging.INFO, debuglevel=debuglevel)
     

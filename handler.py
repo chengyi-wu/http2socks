@@ -28,8 +28,10 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         '''
         try:
             super(SocksRequestHandler, self).handle_one_request()
-        except socket.error as e:
-            if self.debuglevel > 0: print("[SocksRequestHandler]", str(e))
+        except ConnectionAbortedError as err:
+            # client has closed the socket
+            self.close_connection = True
+            if self.debuglevel > 0 : print("[SocksRequestHandler]", str(err))
 
     def finish(self):
         '''Override to make sure no resource leak.
@@ -168,7 +170,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
             self.shadowsocks = None
 
         if self.debuglevel > 0: # pass
-            print("[_forward_response] [%s] [%r] resp.will_close=%s" % (self.requestline, self.shadowsocks.addr, resp.will_close))
+            print("[_forward_response] [%s] resp.will_close=%s" % (self.requestline, resp.will_close))
 
         self.send_response_only(resp.code, resp.reason)
         if resp.headers:
@@ -250,8 +252,14 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
             try:
                 self._forward_response(debuglevel=self.debuglevel)
             except socket.error: # may not be able to send back
-                self.close_connection = True
-                if self.debuglevel > 0: print("Client has closed unable to send back the response.")
+                if self.close_connection == "UNKNOWN":
+                    self.close_connection = True
+                pass
+            except Exception as err:
+                if self.debuglevel > 0: print("[_forward] [%s]: %s" % (self.requestline, str(err)))
+                if self.close_connection == 'UNKNOWN':
+                    self.close_connection = True
+                raise err
         if self.debuglevel > 0: print("[_forward] leaving [%s]" % self.requestline)
 
     def do_GET(self):
