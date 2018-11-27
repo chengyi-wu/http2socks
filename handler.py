@@ -250,8 +250,11 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
             try:
                 self._forward_response(debuglevel=self.debuglevel)
             except socket.error: # may not be able to send back
+                pass
+            except Exception as err:
+                if self.debuglevel > 0: print("[_forward] Unable to forward response for [%s]:%s" % (self.requestline, str(err)))
                 self.close_connection = True
-                if self.debuglevel > 0: print("Client has closed unable to send back the response.")
+                raise
         if self.debuglevel > 0: print("[_forward] leaving [%s]" % self.requestline)
 
     def do_GET(self):
