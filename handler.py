@@ -31,6 +31,13 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         except socket.error as e:
             if self.debuglevel > 0: print("[SocksRequestHandler]", str(e))
 
+    def finish(self):
+        '''Override to make sure no resource leak.
+        '''
+        if self.shadowsocks:
+            self.shadowsocks.close()
+        super(SocksRequestHandler, self).finish()
+
     def _recvall(self, sock:socket.socket):
         data = b''
         while True:
@@ -271,11 +278,12 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         
         self.shadowsocks = self._tunnel(host, port)
 
-        self.send_response_only(200)
-        self.end_headers()
-
         if self.shadowsocks:
+            self.send_response_only(200)
+            self.end_headers()
             self._blind_forward()
             self.shadowsocks.close()
+        else:
+            self.send_error(HTTPStatus.BAD_GATEWAY)
         
         self.close_connection = True
