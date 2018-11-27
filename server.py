@@ -1,17 +1,17 @@
 import socket
 from socketserver import ThreadingMixIn
-from handler import SocksRequestHandler
+from handler import RelayRequestHandler
 import logging
 import sys
 import time
 import threading
 from http.server import HTTPServer
 
-logger = logging.getLogger('PyProxyServer')
+logger = logging.getLogger('RelayProxyServer')
 
 # class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 #     daemon_threads = True
-class PyProxyServer(ThreadingMixIn, HTTPServer):
+class RelayProxyServer(ThreadingMixIn, HTTPServer):
     '''Copy of Python 3.7 ThreadingHTTPServer
     '''
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
@@ -19,21 +19,21 @@ class PyProxyServer(ThreadingMixIn, HTTPServer):
         self.openrequests = []
         self.debuglevel = 0
         self.proxy = None
-        super(PyProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
+        super(RelayProxyServer, self).__init__(server_address, RequestHandlerClass, bind_and_activate)
 
     def process_request(self, request, client_address):
         """Overridden
         same as ThreadingTCPServer.process_request
         """
         self.openrequests.append(request.fileno())
-        super(PyProxyServer, self).process_request(request, client_address)
+        super(RelayProxyServer, self).process_request(request, client_address)
 
     def close_request(self, request):
         """Overridden
         same as ThreadingTCPServer.close_request
         """
         self.openrequests.remove(request.fileno())
-        super(PyProxyServer, self).close_request(request)
+        super(RelayProxyServer, self).close_request(request)
 
     def server_activate(self):
         """Overridden
@@ -44,7 +44,7 @@ class PyProxyServer(ThreadingMixIn, HTTPServer):
         self.timer_timeout = 10
         self.timer.start()
 
-        super(PyProxyServer, self).server_activate()
+        super(RelayProxyServer, self).server_activate()
 
     def _timer_event(self):
         """timer
@@ -52,14 +52,14 @@ class PyProxyServer(ThreadingMixIn, HTTPServer):
         """
         while True:
             time.sleep(self.timer_timeout)
-            print("[PyProxyServer] [%s] Open Requests = %d %s" % (time.strftime("%H:%M:%S"), len(self.openrequests), repr(self.openrequests)))
+            print("[RelayProxyServer] [%s] Open Requests = %d %s" % (time.strftime("%H:%M:%S"), len(self.openrequests), repr(self.openrequests)))
 
 def main(host:str, port:int, proxy = None, level=logging.INFO, debuglevel=0):
     logging.basicConfig(level=level)
-    svr_class = PyProxyServer
+    svr_class = RelayProxyServer
     svr_class.allow_reuse_address = True
     # svr = socketserver.TCPServer((host, port), sockshandler.SocksHandler)
-    svr = svr_class((host, port), SocksRequestHandler)
+    svr = svr_class((host, port), RelayRequestHandler)
     
     svr.debuglevel = debuglevel
     svr.proxy = proxy

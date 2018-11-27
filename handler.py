@@ -9,36 +9,36 @@ import socks
 from http.client import HTTPResponse
 import logging
 
-logger = logging.getLogger('SocksRequestHandler')
+logger = logging.getLogger('RelayRequestHandler')
 
 # maximal line length when calling readline().
 _MAXLINE = 65536
 
-class SocksRequestHandler(BaseHTTPRequestHandler):
+class RelayRequestHandler(BaseHTTPRequestHandler):
     def __init__(self, request, classmethod, server):
         self.protocol_version = 'HTTP/1.1' # support persistent connection
         self.shadowsocks = None
         self.debuglevel = server.debuglevel
         self.idle_timeout = 30 # keep-alive timeout for https
         self.proxy = server.proxy
-        super(SocksRequestHandler, self).__init__(request, classmethod, server)
+        super(RelayRequestHandler, self).__init__(request, classmethod, server)
 
     def handle_one_request(self):
         '''Override to handle [Errno 54] Connection reset by peer.
         '''
         try:
-            super(SocksRequestHandler, self).handle_one_request()
+            super(RelayRequestHandler, self).handle_one_request()
         except ConnectionAbortedError as err:
             # client has closed the socket
             self.close_connection = True
-            if self.debuglevel > 0 : print("[SocksRequestHandler]", str(err))
+            if self.debuglevel > 0 : print("[RelayRequestHandler]", str(err))
 
     def finish(self):
         '''Override to make sure no resource leak.
         '''
         if self.shadowsocks:
             self.shadowsocks.close()
-        super(SocksRequestHandler, self).finish()
+        super(RelayRequestHandler, self).finish()
 
     def _recvall(self, sock:socket.socket):
         data = b''
@@ -72,8 +72,8 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         
         return shadowsock
 
-    def _blind_forward(self):
-        if self.debuglevel > 0: print("[_blind_forward] entering [%s]" % self.requestline)
+    def _blind_relay(self):
+        if self.debuglevel > 0: print("[_blind_relay] entering [%s]" % self.requestline)
         start_time = time.time()
 
         req_q = Queue()
@@ -96,7 +96,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
                     data = fd.recv(_MAXLINE)
                 except socket.error as err:
                     if self.debuglevel > 0:
-                        print("[_blind_forward] [rfd] %s" % str(err))
+                        print("[_blind_relay] [rfd] %s" % str(err))
                 # else:
                 #     print('RECV from [%d] : %s' % (fd.fileno(), data))
                 if data:
@@ -122,7 +122,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
                         fd.send(data)
                     except socket.error as err:
                         if self.debuglevel > 0:
-                            print("[_blind_forward] [wfd] %s" % str(err))
+                            print("[_blind_relay] [wfd] %s" % str(err))
                     # else:
                     #     print('SEND from [%d] : %s' % (fd.fileno(), data))
             if count == self.idle_timeout:
@@ -130,11 +130,11 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
                 time_elapsed = time.time() - start_time
                 logger.info("idle timeout [%s] : %.4f" % (self.requestline, time_elapsed))
                 if self.debuglevel > 0:
-                    print('[_blind_forward] idle timeout [%s] : %.4f' % (self.requestline, time_elapsed))
+                    print('[_blind_relay] idle timeout [%s] : %.4f' % (self.requestline, time_elapsed))
                 break
-        if self.debuglevel > 0: print("[_blind_forward] leaving [%s]" % self.requestline)
+        if self.debuglevel > 0: print("[_blind_relay] leaving [%s]" % self.requestline)
 
-    def _forward_request(self, requestline, debuglevel=0):
+    def _relay_request(self, requestline, debuglevel=0):
         data = requestline
 
         content_length, chunked = None, None
@@ -158,7 +158,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
             if debuglevel > 0: print("send:", data)
             self.shadowsocks.send(data)
 
-    def _forward_response(self, debuglevel=0):
+    def _relay_response(self, debuglevel=0):
         resp = HTTPResponse(self.shadowsocks, debuglevel=debuglevel, method=self.command)
 
         resp.begin()
@@ -170,7 +170,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
             self.shadowsocks = None
 
         if self.debuglevel > 0: # pass
-            print("[_forward_response] [%s] resp.will_close=%s" % (self.requestline, resp.will_close))
+            print("[_relay_response] [%s] resp.will_close=%s" % (self.requestline, resp.will_close))
 
         self.send_response_only(resp.code, resp.reason)
         if resp.headers:
@@ -178,7 +178,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
                 val = resp.headers[hdr]
                 if debuglevel > 0: print("response header:", (hdr, val))
                 self.send_header(hdr, val)
-        self.send_header("Z-Forwarded-By", "Python Proxy Server 0.0.2")
+        self.send_header("Z-Relayed-By", "Python Proxy Server 0.0.2")
         self.end_headers()
 
         # self.close_connection = True
@@ -209,16 +209,16 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         self.request.send(b'\r\n')
 
         if self.debuglevel > 0:
-            print("[_forward_response]", resp.code, resp.reason, self.requestline)
+            print("[_relay_response]", resp.code, resp.reason, self.requestline)
 
         if resp.will_close:
             resp.close()
 
         if resp.code == HTTPStatus.UNAUTHORIZED:
-            self._blind_forward()
+            self._blind_relay()
 
-    def _forward(self):
-        if self.debuglevel > 0: print("[_forward] entering [%s]" % self.requestline)
+    def _relay(self):
+        if self.debuglevel > 0: print("[_relay] entering [%s]" % self.requestline)
         result = urlparse(self.path)
         netloc, path, query, fragment = result.netloc, result.path, result.query, result.fragment
 
@@ -244,38 +244,38 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
             return    
 
         try:
-            self._forward_request(new_requestline, debuglevel=self.debuglevel)
+            self._relay_request(new_requestline, debuglevel=self.debuglevel)
         except Exception as err:
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, message=str(err))
             self.close_connection = True
         else:
             try:
-                self._forward_response(debuglevel=self.debuglevel)
+                self._relay_response(debuglevel=self.debuglevel)
             except socket.error: # may not be able to send back
                 if self.close_connection == "UNKNOWN":
                     self.close_connection = True
                 pass
             except Exception as err:
-                if self.debuglevel > 0: print("[_forward] [%s]: %s" % (self.requestline, str(err)))
+                if self.debuglevel > 0: print("[_relay] [%s]: %s" % (self.requestline, str(err)))
                 if self.close_connection == 'UNKNOWN':
                     self.close_connection = True
                 raise err
-        if self.debuglevel > 0: print("[_forward] leaving [%s]" % self.requestline)
+        if self.debuglevel > 0: print("[_relay] leaving [%s]" % self.requestline)
 
     def do_GET(self):
-        self._forward()
+        self._relay()
         
     def do_POST(self):
-        self._forward()
+        self._relay()
 
     def do_HEAD(self):
-        self._forward()
+        self._relay()
 
     def do_PUT(self):
-        self._forward()
+        self._relay()
 
     def do_DELETE(self):
-        self._forward()
+        self._relay()
         
     def do_CONNECT(self):
         if self.debuglevel > 0:
@@ -289,7 +289,7 @@ class SocksRequestHandler(BaseHTTPRequestHandler):
         if self.shadowsocks:
             self.send_response_only(200)
             self.end_headers()
-            self._blind_forward()
+            self._blind_relay()
             self.shadowsocks.close()
         else:
             self.send_error(HTTPStatus.BAD_GATEWAY)
