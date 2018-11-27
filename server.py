@@ -14,8 +14,8 @@ logger = logging.getLogger('RelayProxyServer')
 class RelayProxyServer(ThreadingMixIn, HTTPServer):
     '''Copy of Python 3.7 ThreadingHTTPServer
     '''
+    daemon_threads = True
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
-        daemon_threads = True
         self.openrequests = []
         self.debuglevel = 0
         self.proxy = None
@@ -52,7 +52,7 @@ class RelayProxyServer(ThreadingMixIn, HTTPServer):
         """
         while True:
             time.sleep(self.timer_timeout)
-            print("[RelayProxyServer] [%s] Open Requests = %d %s" % (time.strftime("%H:%M:%S"), len(self.openrequests), repr(self.openrequests)))
+            print("[RelayProxyServer] [%s] Open Requests = %d : %s" % (time.strftime("%H:%M:%S"), len(self.openrequests), repr(self.openrequests)))
 
 def main(host:str, port:int, proxy = None, level=logging.INFO, debuglevel=0):
     logging.basicConfig(level=level)
@@ -85,8 +85,11 @@ if __name__ == '__main__':
             argv.remove(arg)
             debuglevel = 1
             break
+    if debuglevel > 0:
+        print("Lauch in debug mode")
     if len(argv) % 2 != 0:
         print("Incorrect parameneters")
+        exit(-1)
     for i in range(0, len(argv), 2):
         k, v = argv[i].lower(), argv[i + 1]
         if k == '-h':

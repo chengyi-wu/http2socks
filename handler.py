@@ -28,7 +28,7 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
         '''
         try:
             super(RelayRequestHandler, self).handle_one_request()
-        except ConnectionAbortedError as err:
+        except ConnectionResetError as err:
             # client has closed the socket
             self.close_connection = True
             if self.debuglevel > 0 : print("[RelayRequestHandler]", str(err))
