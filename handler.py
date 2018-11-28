@@ -159,7 +159,7 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
             self.shadowsocks.send(data)
 
     def _relay_response(self, debuglevel=0):
-        resp = HTTPResponse(self.shadowsocks, debuglevel=debuglevel, method=self.command)
+        resp = HTTPResponse(self.shadowsocks, method=self.command)
 
         resp.begin()
 
@@ -171,15 +171,24 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
 
         if self.debuglevel > 0: # pass
             print("[_relay_response] [%s] resp.will_close=%s" % (self.requestline, resp.will_close))
-
-        self.send_response_only(resp.code, resp.reason)
+        
+        ver_str = self.protocol_version
+        if resp.version == 10:
+            ver_str = "HTTP/1.0"
+        header = "%s %s %s\r\n" % (ver_str, resp.code, resp.reason)
         if resp.headers:
             for hdr in resp.headers:
                 val = resp.headers[hdr]
-                if debuglevel > 0: print("response header:", (hdr, val))
-                self.send_header(hdr, val)
-        self.send_header("Z-Relayed-By", "Python Proxy Server 0.0.2")
-        self.end_headers()
+                header += "%s: %s\r\n" % (hdr, val)
+        header += "%s: %s\r\n" % ("Z-Relayed-By", "Python Proxy Server 0.0.2")
+        header += "\r\n"
+        header = header.encode("latin-1", "strict")
+
+        if debuglevel > 0: print("response header:", header)
+
+        self.request.send(header)
+
+        body = b''
 
         # self.close_connection = True
 
@@ -187,26 +196,24 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
         #  - RFC7230: 3.3. 1xx, 204(No Content), 304(Not Modified)
         #  - RFC7231: 6.3.6. 205(Reset Content)
         if (self.command == 'HEAD' or 
-            resp.code < 200 or 
+            resp.code < HTTPStatus.OK or 
             resp.code in (HTTPStatus.NO_CONTENT, HTTPStatus.RESET_CONTENT, HTTPStatus.NOT_MODIFIED)):
             if resp.will_close:
                 resp.close()
-            return
+            return resp.code, header, body
         
         resp_body = resp.read()
         if resp.chunked:
             resp_size = len(resp_body)
-            data = "%x\r\n" % resp_size
-            data = data.encode("utf-8")
-            self.request.send(data)
-            self.request.send(resp_body + b'\r\n')
-            if debuglevel > 0: print("response body: %x" % len(resp_body))
-            self.request.send(b'0\r\n')
+            body += ("%x\r\n" % resp_size).encode("utf-8")
+            body += resp_body + b'\r\n'
+            body += b'0\r\n'
         elif len(resp_body) > 0:
-            self.request.send(resp_body)
-            if debuglevel > 0: print("response body: %d" % len(resp_body))
-        
-        self.request.send(b'\r\n')
+            body += resp_body
+
+        body += b'\r\n'
+        self.request.send(body)
+        if debuglevel > 0: print("response body:", body)
 
         if self.debuglevel > 0:
             print("[_relay_response]", resp.code, resp.reason, self.requestline)
@@ -216,6 +223,8 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
 
         if resp.code == HTTPStatus.UNAUTHORIZED:
             self._blind_relay()
+
+        return resp.code, header, body
 
     def _relay(self):
         if self.debuglevel > 0: print("[_relay] entering [%s]" % self.requestline)
@@ -287,7 +296,7 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
         self.shadowsocks = self._tunnel(host, port)
 
         if self.shadowsocks:
-            self.send_response_only(200)
+            self.send_response_only(HTTPStatus.OK)
             self.end_headers()
             self._blind_relay()
             self.shadowsocks.close()
